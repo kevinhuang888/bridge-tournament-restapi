@@ -72,11 +72,6 @@ func (hub * WebSocketHub) RemoveClient(tournamentId string,clientId string){
 	}
 }
 
-//Problem: During refresh, we first need to remove the existing connection through our goroutine
-//After Removing the connection, we need to accept the new connection 
-//The problem is that our frontend is sending multiple connection requests for some reason (need to fix on frontend)
-//Our backend should be able to handle this though.
-
 func (h *Handler) handleConnection(tournamentId, clientId string, conn *websocket.Conn) {
 	defer func() {
 		fmt.Printf("Cleaning up client %s from tournament %s\n", clientId, tournamentId)
@@ -84,12 +79,26 @@ func (h *Handler) handleConnection(tournamentId, clientId string, conn *websocke
 		conn.Close() // only called here
 	}()
 
-	// Optional: keepalive
+	//pingpong
 	conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-	conn.SetPongHandler(func(string) error {
+	conn.SetPongHandler(func(appData string) error {
+		fmt.Printf("PONG received from client %s\n", clientId)
 		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		return nil
 	})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+	
+		for {
+			<-ticker.C
+			if err := conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
+				fmt.Printf("Ping failed for client %s: %v\n", clientId, err)
+				conn.Close() // Close connection to force cleanup
+				break
+			}
+		}
+	}()
 
 	for {
 		_, _, err := conn.ReadMessage()
